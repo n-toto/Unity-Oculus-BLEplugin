@@ -1,12 +1,20 @@
 package com.example.blelib;
 
+import android.Manifest;
+import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Handler;
 import android.util.Log;
 import android.bluetooth.BluetoothGatt;
@@ -17,6 +25,8 @@ import android.widget.Toast;
 
 import com.unity3d.player.UnityPlayer;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 public class BLE {
@@ -26,6 +36,7 @@ public class BLE {
 
     private static final String PERIPHERAL_LOCAL_NAME = "MKR WiFi 1010";
     private static final UUID PERIPHERAL_SERVICE_UUID = UUID.fromString("BF9CB85F-620C-4A67-BDD2-1A64213F74CA");
+    // heart rate
     private static final UUID PERIPHERAL_CHARACTERISTIC_UUID = UUID.fromString("5F83E23F-BCA1-42B3-B6F2-EA82BE46A93D");
     private static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
@@ -36,9 +47,15 @@ public class BLE {
     private BluetoothGatt mBluetoothGatt;
     private BluetoothGattCharacteristic mCharacteristic;
     private Handler mHandler;
+    private BluetoothLeScanner mBluetoothLeScanner;
+
+    private Context mContext;
+    private Activity mActivity;
+
+    private ArrayList<BluetoothDevice> deviceList = new ArrayList<>();
 
     // Stops scanning after 30 seconds.
-    private static final long SCAN_PERIOD = 30000;
+    private static final long SCAN_PERIOD = 10000;
 
     public BLE(String gameObjName, String callBackName) {
 
@@ -56,6 +73,7 @@ public class BLE {
         final BluetoothManager bluetoothManager =
                 (BluetoothManager) UnityPlayer.currentActivity.getSystemService(Context.BLUETOOTH_SERVICE);
         mBluetoothAdapter = bluetoothManager.getAdapter();
+        mBluetoothLeScanner = mBluetoothAdapter.getBluetoothLeScanner();
 
         if (mBluetoothAdapter == null) {
             Toast.makeText(UnityPlayer.currentActivity, "Bluetoothをサポートしていません", Toast.LENGTH_SHORT).show();
@@ -63,8 +81,11 @@ public class BLE {
             return;
         }
 
+
+
         onActive();
     }
+
 
     public void onActive() {
         Log.d(TAG, "onActive");
@@ -72,6 +93,20 @@ public class BLE {
             Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
             UnityPlayer.currentActivity.startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
         }
+
+        // runtime permission
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if(UnityPlayer.currentActivity.getApplicationContext().checkCallingOrSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
+            {
+                Log.d(TAG, "permission not granted");
+                UnityPlayer.currentActivity.requestPermissions(
+                        new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1024);
+            }
+            else {
+                Log.d(TAG, "permission granted");
+            }
+        }
+
 
         scanLeDevice(true);
     }
@@ -93,33 +128,57 @@ public class BLE {
         }
     }
 
+
     private void scanLeDevice(final boolean enable) {
+//        ScanFilter scanFilter =
+//                new ScanFilter.Builder()
+//                        .setDeviceName("MKR WiFi 1010")
+//                        .build();
+//        ArrayList scanFilterList = new ArrayList();
+//        scanFilterList.add(scanFilter);
+
+//        ScanSettings scanSettings =
+//                new ScanSettings.Builder()
+//                        .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+//                        .build();
+
         if (enable) {
             mHandler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    mBluetoothAdapter.stopLeScan(mLeScanCallback);
+                    mBluetoothLeScanner.stopScan(mLeScanCallback);
                 }
             }, SCAN_PERIOD);
-
-            mBluetoothAdapter.startLeScan(mLeScanCallback);
+            Log.d(TAG, "scanLeDevice");
+            mBluetoothLeScanner.startScan(mLeScanCallback);
         } else {
-            mBluetoothAdapter.stopLeScan(mLeScanCallback);
+            mBluetoothLeScanner.stopScan(mLeScanCallback);
         }
     }
 
-    private BluetoothAdapter.LeScanCallback mLeScanCallback =
-            new BluetoothAdapter.LeScanCallback() {
+    private ScanCallback mLeScanCallback = new ScanCallback() {
+        @Override
+        public void onScanResult(int callbackType, ScanResult result) {
+            Log.d("scan result:", String.valueOf(result));
+            super.onScanResult(callbackType, result);
 
-                @Override
-                public void onLeScan(final BluetoothDevice device, int rssi, byte[] scanRecord) {
-                    Log.d(TAG, device.getName());
-                    if(PERIPHERAL_LOCAL_NAME.equals(device.getName())){
-                        scanLeDevice(false);
-                        connect(device);
-                    }
-                }
-            };
+            if(PERIPHERAL_LOCAL_NAME.equals(result.getDevice().getName())){
+                scanLeDevice(false);
+                connect(result.getDevice());
+            }
+        }
+
+        @Override
+        public void onBatchScanResults(List<ScanResult> results) {
+            super.onBatchScanResults(results);
+        }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            super.onScanFailed(errorCode);
+        }
+    };
+
 
     private boolean connect(BluetoothDevice device) {
         if (mBluetoothAdapter == null) {
@@ -134,29 +193,33 @@ public class BLE {
         }
 
         mBluetoothGatt = device.connectGatt(UnityPlayer.currentActivity, false, mGattCallback);
-        Log.d(TAG, "Trying to create a new connection.");
+        Log.d(TAG, "Trying to create a new connection:" + device.getName());
+        mBluetoothGatt.connect();
         return true;
     }
 
 
-    private final BluetoothGattCallback mGattCallback = new BluetoothGattCallback() {
-        @Override
-        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
+    private final BluetoothGattCallback mGattCallback =
+            new BluetoothGattCallback() {
+                @Override
+                public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+                    // super.onConnectionStateChange(gatt, status, newState);
+                    if (newState == BluetoothProfile.STATE_CONNECTED) {
+                        scanLeDevice(false);
+                        Log.i(TAG, "Connected to GATT server.");
+                        gatt.discoverServices();
 
-                scanLeDevice(false);
-                Log.i(TAG, "Connected to GATT server.");
-                gatt.discoverServices();
-
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.i(TAG, "Disconnected from GATT server.");
-            } else{
-                Log.i(TAG, "onConnectionStateChange:" + newState);
-            }
-        }
+                    } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                        Log.i(TAG, "Disconnected from GATT server.");
+                    } else{
+                        Log.i(TAG, "onConnectionStateChange:" + newState);
+                    }
+                }
 
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            // super.onServicesDiscovered(gatt, status);
+
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 mCharacteristic = gatt.getService(PERIPHERAL_SERVICE_UUID).
                         getCharacteristic(PERIPHERAL_CHARACTERISTIC_UUID);
