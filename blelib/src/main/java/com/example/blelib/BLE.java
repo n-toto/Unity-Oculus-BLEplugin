@@ -37,9 +37,9 @@ public class BLE {
     // squish rate
     private static final UUID PERIPHERAL_SQUISH_CHARACTERISTIC_UUID = UUID.fromString("5F83E23F-BCA1-42B3-B6F2-EA82BE46A93D");
     // heart rate
-    private static final UUID PERIPHERAL_HR_CHARACTERISTIC_UUID = UUID.fromString("4a036388-dbda-41b4-9905-760f65aeb72c");
+    private static final UUID PERIPHERAL_HR_CHARACTERISTIC_UUID = UUID.fromString("4A036388-DBDA-41B4-9905-760F65AEB72C");
 
-    private static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+    private static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805F9B34FB");
 
     private String mGameObjName;
     private String mCallBackName;
@@ -202,7 +202,7 @@ public class BLE {
 
     private final BluetoothGattCallback mGattCallback =
             new BluetoothGattCallback() {
-
+                boolean flag = false;
                 @Override
                 public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
                     // super.onConnectionStateChange(gatt, status, newState);
@@ -233,32 +233,39 @@ public class BLE {
                         descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                         mBluetoothGatt.writeDescriptor(descriptor);
 
-                        // sleep?
-
-                        mHrCharacteristic = gatt.getService(PERIPHERAL_SERVICE_UUID).
-                                getCharacteristic(PERIPHERAL_HR_CHARACTERISTIC_UUID);
-                        gatt.setCharacteristicNotification(
-                                mHrCharacteristic,
-                                true
-                        );
-                        BluetoothGattDescriptor descriptor2 = mHrCharacteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
-                        descriptor2.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                        mBluetoothGatt.writeDescriptor(descriptor2);
-
                     } else {
                         Log.w(TAG, "onServicesDiscovered received: " + status);
                     }
                 }
 
                 @Override
+                public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+                    Log.d("descriptor", String.valueOf(flag));
+                    if (flag) return;
+
+                    mHrCharacteristic = gatt.getService(PERIPHERAL_SERVICE_UUID).
+                            getCharacteristic(PERIPHERAL_HR_CHARACTERISTIC_UUID);
+                    gatt.setCharacteristicNotification(
+                            mHrCharacteristic,
+                            true
+                    );
+                    BluetoothGattDescriptor descriptor2 = mHrCharacteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
+                    descriptor2.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                    mBluetoothGatt.writeDescriptor(descriptor2);
+                    flag = true;
+                }
+
+                @Override
                 public void onCharacteristicChanged(BluetoothGatt gatt,
                                                     BluetoothGattCharacteristic characteristic) {
                     if (characteristic.getUuid().equals(PERIPHERAL_SQUISH_CHARACTERISTIC_UUID)) {
+                        Log.d(TAG, "squish");
                         int squish = characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT16, 0);
                         UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, String.valueOf(squish));
                     }
 
                     if (characteristic.getUuid().equals(PERIPHERAL_HR_CHARACTERISTIC_UUID)) {
+                        Log.d(TAG, "heartrate");
                         int heartrate = characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT16, 0);
                         UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, String.valueOf(heartrate));
                     }
