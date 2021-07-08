@@ -1,7 +1,6 @@
 package com.example.blelib;
 
 import android.Manifest;
-import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGattCallback;
@@ -32,12 +31,14 @@ import java.util.UUID;
 public class BLE {
     private final static String TAG = BLE.class.getSimpleName();
     private static final int REQUEST_ENABLE_BT = 1;
-    private static final int MY_PERMISSION_RESPONSE = 2;
 
     private static final String PERIPHERAL_LOCAL_NAME = "MKR WiFi 1010";
     private static final UUID PERIPHERAL_SERVICE_UUID = UUID.fromString("BF9CB85F-620C-4A67-BDD2-1A64213F74CA");
+    // squish rate
+    private static final UUID PERIPHERAL_SQUISH_CHARACTERISTIC_UUID = UUID.fromString("5F83E23F-BCA1-42B3-B6F2-EA82BE46A93D");
     // heart rate
-    private static final UUID PERIPHERAL_CHARACTERISTIC_UUID = UUID.fromString("5F83E23F-BCA1-42B3-B6F2-EA82BE46A93D");
+    private static final UUID PERIPHERAL_HR_CHARACTERISTIC_UUID = UUID.fromString("4a036388-dbda-41b4-9905-760f65aeb72c");
+
     private static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
     private String mGameObjName;
@@ -45,14 +46,10 @@ public class BLE {
 
     private BluetoothAdapter mBluetoothAdapter;
     private BluetoothGatt mBluetoothGatt;
-    private BluetoothGattCharacteristic mCharacteristic;
+    private BluetoothGattCharacteristic mSquishCharacteristic;
+    private BluetoothGattCharacteristic mHrCharacteristic;
     private Handler mHandler;
     private BluetoothLeScanner mBluetoothLeScanner;
-
-    private Context mContext;
-    private Activity mActivity;
-
-    private ArrayList<BluetoothDevice> deviceList = new ArrayList<>();
 
     // Stops scanning after 30 seconds.
     private static final long SCAN_PERIOD = 10000;
@@ -80,8 +77,6 @@ public class BLE {
             UnityPlayer.currentActivity.finish();
             return;
         }
-
-
 
         onActive();
     }
@@ -115,9 +110,16 @@ public class BLE {
         Log.d(TAG, "onPause");
         scanLeDevice(false);
 
-        if(mCharacteristic != null){
+        if(mSquishCharacteristic != null){
             mBluetoothGatt.setCharacteristicNotification(
-                    mCharacteristic,
+                    mSquishCharacteristic,
+                    false
+            );
+        }
+
+        if(mHrCharacteristic != null){
+            mBluetoothGatt.setCharacteristicNotification(
+                    mHrCharacteristic,
                     false
             );
         }
@@ -198,9 +200,9 @@ public class BLE {
         return true;
     }
 
-
     private final BluetoothGattCallback mGattCallback =
             new BluetoothGattCallback() {
+
                 @Override
                 public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
                     // super.onConnectionStateChange(gatt, status, newState);
@@ -216,31 +218,52 @@ public class BLE {
                     }
                 }
 
-        @Override
-        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-            // super.onServicesDiscovered(gatt, status);
+                @Override
+                public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+                    // super.onServicesDiscovered(gatt, status);
+                    if (status == BluetoothGatt.GATT_SUCCESS) {
+                        mSquishCharacteristic = gatt.getService(PERIPHERAL_SERVICE_UUID).
+                                getCharacteristic(PERIPHERAL_SQUISH_CHARACTERISTIC_UUID);
 
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                mCharacteristic = gatt.getService(PERIPHERAL_SERVICE_UUID).
-                        getCharacteristic(PERIPHERAL_CHARACTERISTIC_UUID);
+                        gatt.setCharacteristicNotification(
+                                mSquishCharacteristic,
+                                true
+                        );
+                        BluetoothGattDescriptor descriptor = mSquishCharacteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
+                        descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                        mBluetoothGatt.writeDescriptor(descriptor);
 
-                gatt.setCharacteristicNotification(
-                        mCharacteristic,
-                        true
-                );
-                BluetoothGattDescriptor descriptor = mCharacteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
-                descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                mBluetoothGatt.writeDescriptor(descriptor);
-            } else {
-                Log.w(TAG, "onServicesDiscovered received: " + status);
-            }
-        }
+                        // sleep?
 
-        @Override
-        public void onCharacteristicChanged(BluetoothGatt gatt,
-                                            BluetoothGattCharacteristic characteristic) {
-            UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, new String(characteristic.getValue()));
-        }
+                        mHrCharacteristic = gatt.getService(PERIPHERAL_SERVICE_UUID).
+                                getCharacteristic(PERIPHERAL_HR_CHARACTERISTIC_UUID);
+                        gatt.setCharacteristicNotification(
+                                mHrCharacteristic,
+                                true
+                        );
+                        BluetoothGattDescriptor descriptor2 = mHrCharacteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
+                        descriptor2.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                        mBluetoothGatt.writeDescriptor(descriptor2);
+
+                    } else {
+                        Log.w(TAG, "onServicesDiscovered received: " + status);
+                    }
+                }
+
+                @Override
+                public void onCharacteristicChanged(BluetoothGatt gatt,
+                                                    BluetoothGattCharacteristic characteristic) {
+                    if (characteristic.getUuid().equals(PERIPHERAL_SQUISH_CHARACTERISTIC_UUID)) {
+                        int squish = characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT16, 0);
+                        UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, String.valueOf(squish));
+                    }
+
+                    if (characteristic.getUuid().equals(PERIPHERAL_HR_CHARACTERISTIC_UUID)) {
+                        int heartrate = characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT16, 0);
+                        UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, String.valueOf(heartrate));
+                    }
+
+                }
     };
 
 }
