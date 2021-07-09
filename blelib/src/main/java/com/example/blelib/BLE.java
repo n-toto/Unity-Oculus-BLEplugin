@@ -24,6 +24,8 @@ import android.widget.Toast;
 
 import com.unity3d.player.UnityPlayer;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -38,6 +40,8 @@ public class BLE {
     private static final UUID PERIPHERAL_SQUISH_CHARACTERISTIC_UUID = UUID.fromString("5F83E23F-BCA1-42B3-B6F2-EA82BE46A93D");
     // heart rate
     private static final UUID PERIPHERAL_HR_CHARACTERISTIC_UUID = UUID.fromString("4A036388-DBDA-41B4-9905-760F65AEB72C");
+    // press value
+    private static final UUID PERIPHERAL_FORCE_CHARACTERISTIC_UUID = UUID.fromString("D0D9F78B-3D8B-46EE-AA31-B0279C31E692");
 
     private static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805F9B34FB");
 
@@ -48,6 +52,7 @@ public class BLE {
     private BluetoothGatt mBluetoothGatt;
     private BluetoothGattCharacteristic mSquishCharacteristic;
     private BluetoothGattCharacteristic mHrCharacteristic;
+    private BluetoothGattCharacteristic mForceCharacteristic;
     private Handler mHandler;
     private BluetoothLeScanner mBluetoothLeScanner;
 
@@ -120,6 +125,13 @@ public class BLE {
         if(mHrCharacteristic != null){
             mBluetoothGatt.setCharacteristicNotification(
                     mHrCharacteristic,
+                    false
+            );
+        }
+
+        if(mForceCharacteristic != null){
+            mBluetoothGatt.setCharacteristicNotification(
+                    mForceCharacteristic,
                     false
             );
         }
@@ -202,7 +214,7 @@ public class BLE {
 
     private final BluetoothGattCallback mGattCallback =
             new BluetoothGattCallback() {
-                boolean flag = false;
+                int flag = 0;
                 @Override
                 public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
                     // super.onConnectionStateChange(gatt, status, newState);
@@ -241,33 +253,58 @@ public class BLE {
                 @Override
                 public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
                     Log.d("descriptor", String.valueOf(flag));
-                    if (flag) return;
-
-                    mHrCharacteristic = gatt.getService(PERIPHERAL_SERVICE_UUID).
-                            getCharacteristic(PERIPHERAL_HR_CHARACTERISTIC_UUID);
-                    gatt.setCharacteristicNotification(
-                            mHrCharacteristic,
-                            true
-                    );
-                    BluetoothGattDescriptor descriptor2 = mHrCharacteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
-                    descriptor2.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                    mBluetoothGatt.writeDescriptor(descriptor2);
-                    flag = true;
+                    if (flag == 2) return;
+                    if (flag == 0) {
+                        mHrCharacteristic = gatt.getService(PERIPHERAL_SERVICE_UUID).
+                                getCharacteristic(PERIPHERAL_HR_CHARACTERISTIC_UUID);
+                        gatt.setCharacteristicNotification(
+                                mHrCharacteristic,
+                                true
+                        );
+                        BluetoothGattDescriptor descriptor2 = mHrCharacteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
+                        descriptor2.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                        mBluetoothGatt.writeDescriptor(descriptor2);
+                        flag = 1;
+                    }
+                    else if (flag == 1) {
+                        mForceCharacteristic = gatt.getService(PERIPHERAL_SERVICE_UUID).
+                                getCharacteristic(PERIPHERAL_FORCE_CHARACTERISTIC_UUID);
+                        gatt.setCharacteristicNotification(
+                                mForceCharacteristic,
+                                true
+                        );
+                        BluetoothGattDescriptor descriptor3 = mForceCharacteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
+                        descriptor3.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                        mBluetoothGatt.writeDescriptor(descriptor3);
+                        flag = 2;
+                    }
                 }
 
                 @Override
                 public void onCharacteristicChanged(BluetoothGatt gatt,
                                                     BluetoothGattCharacteristic characteristic) {
                     if (characteristic.getUuid().equals(PERIPHERAL_SQUISH_CHARACTERISTIC_UUID)) {
-                        Log.d(TAG, "squish");
-                        int squish = characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT16, 0);
-                        UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, String.valueOf(squish));
+                        byte[] b= characteristic.getValue();
+                        float squish = ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN).getFloat();
+                        String str = "s:" + squish;
+                        Log.d(TAG, str);
+                        UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, str);
                     }
 
                     if (characteristic.getUuid().equals(PERIPHERAL_HR_CHARACTERISTIC_UUID)) {
-                        Log.d(TAG, "heartrate");
                         int heartrate = characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT16, 0);
-                        UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, String.valueOf(heartrate));
+                        String str = "h:" + heartrate;
+                        Log.d(TAG, str);
+                        UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, str);
+                    }
+
+                    if (characteristic.getUuid().equals(PERIPHERAL_FORCE_CHARACTERISTIC_UUID)) {
+                        byte[] b= characteristic.getValue();
+                        float forcevalue = ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN).getFloat();
+                        // float forcevalue = characteristic.getFloatValue(BluetoothGattCharacteristic.FORMAT_FLOAT, 0);
+                        String str = "f:" + forcevalue;
+                        Log.d(TAG, str);
+                        UnityPlayer.UnitySendMessage(mGameObjName, mCallBackName, str);
                     }
 
                 }
